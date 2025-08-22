@@ -1,0 +1,189 @@
+# This file configures GitHub to run Databricks unit tests on pull requests.
+#
+# The tests in the tests/ folder will be executed on a Databricks cluster
+# to ensure compatibility with the Databricks runtime environment.
+name: Run Databricks Unit Tests
+
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'requirements*.txt'
+      - 'setup.py'
+      - 'pyproject.toml'
+      - '.github/workflows/databricks-test.yml'
+
+env:
+  # Databricks workspace URL from GitHub secrets
+  DATABRICKS_HOST: https://${{ secrets.DATABRICKS_INSTANCE }}/
+
+jobs:
+  databricks-unit-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          # Fetch the full history to enable proper git operations
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install databricks-cli
+
+      - name: Generate Databricks Token
+        run: |
+          echo "DATABRICKS_TOKEN=$(curl -X POST \
+            https://${{ secrets.DATABRICKS_INSTANCE }}/oidc/v1/token \
+            -d 'client_id=${{ secrets.DATABRICKS_CLIENT_ID }}' \
+            -d 'client_secret=${{ secrets.DATABRICKS_CLIENT_SECRET }}' \
+            -d 'grant_type=client_credentials' \
+            -d 'scope=all-apis' | jq -r '.access_token')" >> $GITHUB_ENV
+
+      - name: Create test runner notebook
+        run: |
+          mkdir -p notebooks
+          cat > notebooks/run_unit_tests.py << 'EOF'
+          # Databricks notebook source
+          # MAGIC %md
+          # MAGIC # Unit Test Runner
+          # MAGIC This notebook runs unit tests from the tests/ directory on Databricks
+
+          # COMMAND ----------
+
+          import sys
+          import subprocess
+          import os
+
+          # COMMAND ----------
+
+          # Install test dependencies
+          subprocess.check_call([sys.executable, "-m", "pip", "install", "pytest", "pytest-cov", "databricks-dlt"])
+
+          # COMMAND ----------
+
+          # Get the workspace path where the repo is checked out
+          workspace_path = os.getcwd()
+          print(f"Workspace path: {workspace_path}")
+
+          # Add src to Python path
+          sys.path.insert(0, os.path.join(workspace_path, "src"))
+
+          # COMMAND ----------
+
+          # Run pytest
+          import pytest
+
+          # Configure pytest arguments
+          pytest_args = [
+              "-v",  # Verbose output
+              "--tb=short",  # Short traceback format
+              "--color=yes",  # Colored output
+              "--cov=src/dabs",  # Coverage for the dabs module
+              "--cov-report=term-missing",  # Show missing lines in coverage
+              "--cov-report=xml",  # Generate XML coverage report
+              os.path.join(workspace_path, "tests"),  # Test directory
+          ]
+
+          # Run the tests
+          exit_code = pytest.main(pytest_args)
+
+          # COMMAND ----------
+
+          # Display results
+          if exit_code == 0:
+              print("✅ All tests passed successfully!")
+          else:
+              print(f"❌ Tests failed with exit code: {exit_code}")
+              raise SystemExit(exit_code)
+          EOF
+
+      - name: Run tests on Databricks
+        uses: databricks/run-notebook@main
+        with:
+          databricks-token: ${{ env.DATABRICKS_TOKEN }}
+          
+          # Path to the test runner notebook
+          local-notebook-path: notebooks/run_unit_tests.py
+
+          # Databricks cluster configuration
+          # Using a small cluster for unit tests
+          new-cluster-json: >
+            {
+              "num_workers": 1,
+              "spark_version": "15.4.x-scala2.12",
+              "node_type_id": "i3.xlarge",
+              "spark_env_vars": {
+                "PYTHONPATH": "/databricks/driver"
+              }
+            }
+
+          # Git commit information for tracking
+          git-commit: "${{ github.event.pull_request.head.sha }}"
+
+          # Grant all users view permission on the notebook's results
+          access-control-list-json: >
+            [
+              {
+                "group_name": "users",
+                "permission_level": "CAN_VIEW"
+              }
+            ]
+
+          # Give the run a descriptive name
+          run-name: "Unit Tests - PR #${{ github.event.pull_request.number }}"
+
+      - name: Upload coverage reports
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: coverage-report
+          path: |
+            coverage.xml
+            .coverage
+          retention-days: 30
+
+      # Optional: Add coverage reporting to PR comments
+      - name: Comment test results on PR
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const outcome = '${{ job.status }}';
+            const prNumber = context.issue.number;
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            
+            let emoji = outcome === 'success' ? '✅' : '❌';
+            let status = outcome === 'success' ? 'passed' : 'failed';
+            
+            const comment = `## Databricks Unit Test Results ${emoji}
+
+            The unit tests have ${status}.
+            
+            🔗 [View full test results](${runUrl})
+            
+            <details>
+            <summary>Test Configuration</summary>
+            
+            - **Spark Version**: 15.4.x-scala2.12
+            - **Node Type**: i3.xlarge
+            - **Workers**: 1
+            - **Commit**: ${{ github.event.pull_request.head.sha }}
+            
+            </details>`;
+            
+            github.rest.issues.createComment({
+              issue_number: prNumber,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
