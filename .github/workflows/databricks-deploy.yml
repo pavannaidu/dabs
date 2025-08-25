@@ -1,0 +1,52 @@
+name: Deploy Databricks bundle
+
+on:
+  push:
+    branches: ["main"]
+
+env:
+  DATABRICKS_CLIENT_ID: ${{secrets.DATABRICKS_CLIENT_ID}}
+  DATABRICKS_CLIENT_SECRET: ${{secrets.DATABRICKS_CLIENT_SECRET}}
+  # Databricks workspace URL from GitHub secrets
+  DATABRICKS_HOST: https://${{ secrets.DATABRICKS_INSTANCE }}/
+
+jobs:
+  deploy:
+    name: Deploy bundle
+    runs-on: ubuntu-latest
+
+    environment: databricks
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup databricks CLI
+        uses: databricks/setup-cli@main
+
+      - name: Deploy bundle
+        run: databricks bundle deploy --target prod
+        env:
+          DATABRICKS_BUNDLE_ENV: prod
+
+  run_pipeline:
+    name: Run pipeline update
+    runs-on: ubuntu-latest
+
+    # Run the "deploy" job before.
+    needs:
+      - deploy
+
+    environment: databricks
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup databricks CLI
+        uses: databricks/setup-cli@main
+
+      - name: Run pipeline update
+        run: databricks bundle run dabs_job --target prod
+        env:
+          DATABRICKS_BUNDLE_ENV: prod
