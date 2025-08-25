@@ -17,7 +17,7 @@ setup(
     name="dabs",
     # We use timestamp as Local version identifier (https://peps.python.org/pep-0440/#local-version-identifiers.)
     # to ensure that changes to wheel package are picked up when used on all-purpose clusters
-    version=dabs.__version__ + "+" + datetime.datetime.utcnow().strftime("%Y%m%d.%H%M%S"),
+    version=dabs.__version__ + "+" + datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d.%H%M%S"),
     url="https://databricks.com",
     author="pavan.naidu@databricks.com",
     description="wheel file based on dabs/src",
