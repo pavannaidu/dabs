@@ -3,10 +3,11 @@ resources:
   pipelines:
     dabs_pipeline:
       name: dabs_pipeline
-      target: dabs_${bundle.environment}
+      catalog: main
+      schema: dabs_pavan_${bundle.environment}
       libraries:
         - notebook:
-            path: ../src/dlt_pipeline.ipynb
+            path: ../src/ldp_pipeline.ipynb
 
       configuration:
-        bundle.sourcePath: /Workspace/${workspace.file_path}/src
+        bundle.sourcePath: ${workspace.file_path}/src

@@ -7,7 +7,6 @@ on:
 env:
   DATABRICKS_CLIENT_ID: ${{secrets.DATABRICKS_CLIENT_ID}}
   DATABRICKS_CLIENT_SECRET: ${{secrets.DATABRICKS_CLIENT_SECRET}}
-  # Databricks workspace URL from GitHub secrets
   DATABRICKS_HOST: https://${{ secrets.DATABRICKS_INSTANCE }}/
 
 jobs:
@@ -25,7 +24,7 @@ jobs:
         uses: databricks/setup-cli@main
 
       - name: Deploy bundle
-        run: databricks bundle deploy --target prod
+        run: databricks bundle deploy
         env:
           DATABRICKS_BUNDLE_ENV: prod
 
@@ -47,6 +46,6 @@ jobs:
         uses: databricks/setup-cli@main
 
       - name: Run pipeline update
-        run: databricks bundle run dabs_job --target prod
+        run: databricks bundle run dabs_job
         env:
           DATABRICKS_BUNDLE_ENV: prod
